@@ -1,0 +1,25 @@
+sudo: required
+language: python
+python:
+- '3.6'
+services:
+- docker
+os:
+- linux
+env:
+  global:
+  - RELEASE_NAME="[REPO_NAME]"
+  - DJANGO_APP="[PACKAGE]"
+  - COMMIT_HASH="$(git rev-parse --short=7 HEAD)"
+  - IMAGE_TAG="${RELEASE_NAME}:${COMMIT_HASH}"
+install:
+- docker build -t "$IMAGE_TAG" .
+before_script:
+- pip install coverage
+- pip install coveralls
+script:
+- docker run -u root -it -v /tmp:/coverage -e DJANGO_APP="$DJANGO_APP" -e "ENV=localdev" -e "AUTH=SAML_MOCK" "$IMAGE_TAG" bash -c ". ./travis-ci/test.sh"
+after_success:
+- cp /tmp/.coverage.* .
+- coverage combine
+- coveralls
