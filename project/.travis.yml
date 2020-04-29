@@ -6,20 +6,59 @@ services:
 - docker
 os:
 - linux
+
 env:
   global:
   - RELEASE_NAME="[REPO_NAME]"
   - DJANGO_APP="[PACKAGE]"
   - COMMIT_HASH="$(git rev-parse --short=7 HEAD)"
   - IMAGE_TAG="${RELEASE_NAME}:${COMMIT_HASH}"
+# Define "true" to deploy after successful test
+  - DEPLOY=false
+# Define secrets to write docker and github for deploy
+  - secret: "[travis-encrypted: DOCKER_USER=<username>]"
+  - secret: "[travis-encrypted: DOCKER_PASS=<password>]"
+  - secret: "[travis-encrypted: GH_AUTH_TOKEN=<github-token>]"
+
 install:
-- docker build -t "$IMAGE_TAG" .
+  - docker build --target app-container -t "$IMAGE_TAG" .
+  - docker build -t app-test-container .
+
 before_script:
 - pip install coverage
 - pip install coveralls
+
 script:
-- docker run -u root -it -v /tmp:/coverage -e DJANGO_APP="$DJANGO_APP" -e "ENV=localdev" -e "AUTH=SAML_MOCK" "$IMAGE_TAG" bash -c ". ./travis-ci/test.sh"
+- docker run -u root -it -v /tmp:/coverage -e DJANGO_APP="$DJANGO_APP" -e "ENV=localdev" -e "AUTH=SAML_MOCK" app-test-container bash -c ". ./travis-ci/test.sh"
+
 after_success:
 - cp /tmp/.coverage.* .
 - coverage combine
 - coveralls
+- |
+  if [ "$DEPLOY" == "true" ] && [ "$TRAVIS_PULL_REQUEST" == "false" ]; then
+    case "$TRAVIS_BRANCH" in
+      "master")
+        export APP_INSTANCE="prod";
+        ;;
+      "develop")
+        export APP_INSTANCE="test";
+        ;;
+## case below is an example of specific branch deploy that
+## maps github repo branch to the deployed GCP/MCI application instance.
+#      "feature/some-cool-thing")
+#        export APP_INSTANCE="dev";
+#        ;;
+      *)
+        unset APP_INSTANCE
+        ;;
+    esac
+    if [[ "$APP_INSTANCE" ]]; then
+      curl -Ls ${DEPLOY_SCRIPT_BASE}/travis-ci/deploy.sh | bash;
+    fi
+  fi
+
+cache:
+  directories:
+  - "$HOME/helm"
+  - "$HOME/kubeval"
